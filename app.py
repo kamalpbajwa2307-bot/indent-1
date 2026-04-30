@@ -141,8 +141,17 @@ initialize_defaults()
 @app.context_processor
 def inject_global_vars():
     if 'user_id' in session:
-        fys = [doc.to_dict()['name'] for doc in db.collection('financial_years').order_by('name', direction=firestore.Query.DESCENDING).stream()]
-        return dict(available_fys=fys)
+        if db is None:
+            print("ERROR: Database not initialized.")
+            return dict(available_fys=[])
+            
+        try:
+            fys = [doc.to_dict()['name'] for doc in db.collection('financial_years').order_by('name', direction=firestore.Query.DESCENDING).stream()]
+            return dict(available_fys=fys)
+        except Exception as e:
+            print(f"ERROR fetching financial years: {e}")
+            return dict(available_fys=[])
+            
     return dict(available_fys=[])
 
 def get_next_serial_number(collection_name, target_fy, count=1):
