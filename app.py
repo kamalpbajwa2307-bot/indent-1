@@ -2,7 +2,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash, send_file
 from datetime import datetime, timedelta, timezone
-#import pandas as pd
+import pandas as pd
 import io
 import os
 import math
