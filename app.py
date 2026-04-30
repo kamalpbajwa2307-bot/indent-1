@@ -1,4 +1,9 @@
+import firebase_admin  # <-- ADDED THIS
+from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.base_query import FieldFilter  # <-- ADDED THIS
+from google.api_core.exceptions import ResourceExhausted  # <-- ADDED THIS
 import firebase_admin
+
 from firebase_admin import credentials, firestore
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash, send_file
 from datetime import datetime, timedelta, timezone
@@ -106,16 +111,30 @@ def get_default_permissions(role):
     return p
 
 def initialize_defaults():
-    if not list(db.collection('users').where('username', '==', 'admin1').stream()):
-        db.collection('users').add({'username': 'admin1', 'password': 'super', 'name': 'Super Administrator', 'role': 'SuperAdmin'})
-    if not len(list(db.collection('units').limit(1).stream())):
-        for u in ['KG', 'LTR', 'PCS', 'MTR', 'BOX']: db.collection('units').add({'name': u})
-    if not len(list(db.collection('departments').limit(1).stream())):
-        for d in ['HR', 'IT', 'ELECTRICAL', 'CTP', 'STORE']: db.collection('departments').add({'name': d})
-    
-    current_fy = get_fy_string(datetime.now())
-    if not list(db.collection('financial_years').where('name', '==', current_fy).limit(1).stream()):
-        db.collection('financial_years').add({'name': current_fy})
+    # Make sure db actually initialized before trying to query it
+    if db is None:
+        print("WARNING: Database not initialized. Skipping defaults.")
+        return
+
+    try:
+        # Using FieldFilter to prevent the positional argument warning
+        if not list(db.collection('users').where(filter=FieldFilter('username', '==', 'admin1')).stream()):
+            db.collection('users').add({'username': 'admin1', 'password': 'super', 'name': 'Super Administrator', 'role': 'SuperAdmin'})
+        
+        if not len(list(db.collection('units').limit(1).stream())):
+            for u in ['KG', 'LTR', 'PCS', 'MTR', 'BOX']: db.collection('units').add({'name': u})
+            
+        if not len(list(db.collection('departments').limit(1).stream())):
+            for d in ['HR', 'IT', 'ELECTRICAL', 'CTP', 'STORE']: db.collection('departments').add({'name': d})
+        
+        current_fy = get_fy_string(datetime.now())
+        if not list(db.collection('financial_years').where(filter=FieldFilter('name', '==', current_fy)).limit(1).stream()):
+            db.collection('financial_years').add({'name': current_fy})
+
+    except ResourceExhausted:
+        print("WARNING: Firestore quota exceeded. Skipping default initialization.")
+    except Exception as e:
+        print(f"WARNING: Could not initialize defaults: {e}")
 
 initialize_defaults()
 
