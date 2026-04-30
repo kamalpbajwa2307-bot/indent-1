@@ -37,7 +37,6 @@ if firebase_creds_json:
         print(f"Error parsing JSON or initializing Firebase: {e}")
 else:
     print("CRITICAL ERROR: FIREBASE_CONFIG environment variable not found!")
-
 # ==========================================
 # 2. LOGIC & HELPERS
 # ==========================================
@@ -107,7 +106,6 @@ def get_default_permissions(role):
     return p
 
 def initialize_defaults():
-    if not db: return
     if not list(db.collection('users').where('username', '==', 'admin1').stream()):
         db.collection('users').add({'username': 'admin1', 'password': 'super', 'name': 'Super Administrator', 'role': 'SuperAdmin'})
     if not len(list(db.collection('units').limit(1).stream())):
@@ -119,12 +117,11 @@ def initialize_defaults():
     if not list(db.collection('financial_years').where('name', '==', current_fy).limit(1).stream()):
         db.collection('financial_years').add({'name': current_fy})
 
-# FIX: Removed global call to prevent Vercel boot timeouts
-# initialize_defaults()
+initialize_defaults()
 
 @app.context_processor
 def inject_global_vars():
-    if 'user_id' in session and db:
+    if 'user_id' in session:
         fys = [doc.to_dict()['name'] for doc in db.collection('financial_years').order_by('name', direction=firestore.Query.DESCENDING).stream()]
         return dict(available_fys=fys)
     return dict(available_fys=[])
@@ -176,23 +173,18 @@ def delete_last_entry_helper(collection_name, doc_id, target_fy):
     return False
 
 def get_units_list():
-    if not db: return []
     return sorted(list(set([doc.to_dict()['name'] for doc in db.collection('units').stream()])))
 
 def get_departments_list():
-    if not db: return []
     return sorted(list(set([doc.to_dict()['name'] for doc in db.collection('departments').stream()])))
 
 def get_people_list():
-    if not db: return []
     return sorted(list(set([doc.to_dict()['name'] for doc in db.collection('indent_persons').stream()])))
 
 def get_companies_list():
-    if not db: return []
     return sorted(list(set([doc.to_dict()['name'] for doc in db.collection('companies').stream()])))
 
 def add_if_new(collection, name):
-    if not db: return
     if not name or name.lower() == 'other': return
     name = name.strip().upper()
     existing = list(db.collection(collection).where('name', '==', name).stream())
@@ -877,21 +869,8 @@ HTML_EDIT_USER = """<!DOCTYPE html><html lang="en">""" + HTML_BASE_HEAD + """<bo
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # FIXED: Run the setup check safely ONLY when someone accesses the login page, instead of globally.
-    try:
-        if db:
-            initialize_defaults()
-    except Exception as e:
-        print("Setup error:", e)
-
     if request.method == 'POST':
         if request.form.get('change_password'): return redirect(url_for('change_password'))
-        
-        # If DB didn't load, prevent login attempt to avoid unhandled crash
-        if not db:
-            flash('Database configuration is missing or broken. Cannot log in.')
-            return render_template_string(HTML_LOGIN)
-            
         users = db.collection('users').where('username', '==', request.form['username']).where('password', '==', request.form['password']).stream()
         user = next(users, None)
         if user:
@@ -1925,6 +1904,7 @@ def restore_database():
         flash(f"Restore failed: {str(e)}", "danger")
         
     return redirect(url_for('settings'))
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
