@@ -1,9 +1,4 @@
-import firebase_admin  # <-- ADDED THIS
-from firebase_admin import credentials, firestore
-from google.cloud.firestore_v1.base_query import FieldFilter  # <-- ADDED THIS
-from google.api_core.exceptions import ResourceExhausted  # <-- ADDED THIS
 import firebase_admin
-
 from firebase_admin import credentials, firestore
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash, send_file
 from datetime import datetime, timedelta, timezone
@@ -12,36 +7,32 @@ import io
 import os
 import math
 import json
-import base64
 
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
 app = Flask(__name__)
 app.secret_key = 'secure_key_v38_pending_filter_sort'
-app.debug = True
+
 # --- AUTO LOGOUT CONFIGURATION ---
 app.permanent_session_lifetime = timedelta(minutes=15)
 
 # --- FIREBASE SETUP START ---
+# Fetching the variable from Railway Environment Variables
 firebase_creds_json = os.getenv('FIREBASE_CONFIG')
 
-db = None
 if firebase_creds_json:
     try:
         cred_dict = json.loads(firebase_creds_json)
         cred = credentials.Certificate(cred_dict)
-        
-        # FIX: Prevent Vercel from crashing on "warm starts" by checking if already initialized
-        if not firebase_admin._apps:
-            firebase_admin.initialize_app(cred)
-            
-        db = firestore.client()
+        firebase_admin.initialize_app(cred)
         print("Firebase successfully initialized!")
     except Exception as e:
         print(f"Error parsing JSON or initializing Firebase: {e}")
 else:
     print("CRITICAL ERROR: FIREBASE_CONFIG environment variable not found!")
+
+db = firestore.client()
 # ==========================================
 # 2. LOGIC & HELPERS
 # ==========================================
@@ -111,47 +102,24 @@ def get_default_permissions(role):
     return p
 
 def initialize_defaults():
-    # Make sure db actually initialized before trying to query it
-    if db is None:
-        print("WARNING: Database not initialized. Skipping defaults.")
-        return
+    if not list(db.collection('users').where('username', '==', 'admin1').stream()):
+        db.collection('users').add({'username': 'admin1', 'password': 'super', 'name': 'Super Administrator', 'role': 'SuperAdmin'})
+    if not len(list(db.collection('units').limit(1).stream())):
+        for u in ['KG', 'LTR', 'PCS', 'MTR', 'BOX']: db.collection('units').add({'name': u})
+    if not len(list(db.collection('departments').limit(1).stream())):
+        for d in ['HR', 'IT', 'ELECTRICAL', 'CTP', 'STORE']: db.collection('departments').add({'name': d})
+    
+    current_fy = get_fy_string(datetime.now())
+    if not list(db.collection('financial_years').where('name', '==', current_fy).limit(1).stream()):
+        db.collection('financial_years').add({'name': current_fy})
 
-    try:
-        # Using FieldFilter to prevent the positional argument warning
-        if not list(db.collection('users').where(filter=FieldFilter('username', '==', 'admin1')).stream()):
-            db.collection('users').add({'username': 'admin1', 'password': 'super', 'name': 'Super Administrator', 'role': 'SuperAdmin'})
-        
-        if not len(list(db.collection('units').limit(1).stream())):
-            for u in ['KG', 'LTR', 'PCS', 'MTR', 'BOX']: db.collection('units').add({'name': u})
-            
-        if not len(list(db.collection('departments').limit(1).stream())):
-            for d in ['HR', 'IT', 'ELECTRICAL', 'CTP', 'STORE']: db.collection('departments').add({'name': d})
-        
-        current_fy = get_fy_string(datetime.now())
-        if not list(db.collection('financial_years').where(filter=FieldFilter('name', '==', current_fy)).limit(1).stream()):
-            db.collection('financial_years').add({'name': current_fy})
-
-    except ResourceExhausted:
-        print("WARNING: Firestore quota exceeded. Skipping default initialization.")
-    except Exception as e:
-        print(f"WARNING: Could not initialize defaults: {e}")
-
-initialize_defaults()
+#initialize_defaults()
 
 @app.context_processor
 def inject_global_vars():
     if 'user_id' in session:
-        if db is None:
-            print("ERROR: Database not initialized.")
-            return dict(available_fys=[])
-            
-        try:
-            fys = [doc.to_dict()['name'] for doc in db.collection('financial_years').order_by('name', direction=firestore.Query.DESCENDING).stream()]
-            return dict(available_fys=fys)
-        except Exception as e:
-            print(f"ERROR fetching financial years: {e}")
-            return dict(available_fys=[])
-            
+        fys = [doc.to_dict()['name'] for doc in db.collection('financial_years').order_by('name', direction=firestore.Query.DESCENDING).stream()]
+        return dict(available_fys=fys)
     return dict(available_fys=[])
 
 def get_next_serial_number(collection_name, target_fy, count=1):
@@ -1932,7 +1900,6 @@ def restore_database():
         flash(f"Restore failed: {str(e)}", "danger")
         
     return redirect(url_for('settings'))
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
